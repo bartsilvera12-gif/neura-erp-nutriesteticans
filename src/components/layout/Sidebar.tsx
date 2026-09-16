@@ -96,17 +96,14 @@ const MENU_STRUCTURE: MenuItem[] = [
   { key: "ventas", slug: "ventas", label: "Ventas", href: "/ventas", icon: ShoppingCart, children: [
     { label: "Nueva factura",       href: "/ventas/nueva" },
     { label: "Facturas emitidas",   href: "/ventas", exactMatch: true },
-    { label: "Notas de remisión",   href: "/notas-remision", exactMatch: true },
+    // Notas de remisión OCULTAS: Nutriestéticans es de servicios/venta directa,
+    // no despacha mercadería con remisión.
   ]},
-  { key: "inventario", slug: "inventario", label: "Inventario", href: "/inventario", icon: Package, children: [
-    { label: "Productos", href: "/inventario" },
-    { label: "Movimientos", href: "/inventario/movimientos" },
-    { label: "Categorías", href: "/inventario/categorias" },
-    // "Depósitos / Ubicaciones" OCULTO (pedido del negocio: una sola sucursal, se
-    // trabaja con el depósito original y nada más). Para reactivar: descomentar
-    // esta línea y quitar el guard de src/app/inventario/ubicaciones/page.tsx.
-    // { label: "Depósitos / Ubicaciones", href: "/inventario/ubicaciones" },
-  ]},
+  // Inventario: sin subvistas por ahora — la clienta pidió catálogo de
+  // Productos/Servicios sin control de stock y sin categorías. Al no declarar
+  // `children`, el sidebar renderiza un link único a /inventario (listado de
+  // productos), que es la única vista habilitada para esta instancia.
+  { key: "inventario", slug: "inventario", label: "Inventario", href: "/inventario", icon: Package },
   { key: "clientes", slug: "clientes", label: "Clientes", href: "/clientes", icon: Users },
   { key: "gestion-clientes", slug: "gestion-clientes", label: "Gestión Clientes", href: "/gestion-clientes", icon: Users },
   {
