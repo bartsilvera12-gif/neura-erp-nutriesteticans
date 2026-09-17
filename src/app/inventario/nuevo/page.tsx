@@ -261,7 +261,15 @@ export default function NuevoProductoPage() {
       // Validaciones básicas en JS (HTML5 desactivado con noValidate).
       const nombreT = form.nombre.trim();
       if (!nombreT) { showErr("El nombre es obligatorio."); return; }
-      if (tipoGastro === "reventa" && !form.sku.trim()) { showErr("El SKU es obligatorio para productos de reventa."); return; }
+      // SKU opcional: si viene vacío, se autogenera con el patrón
+      // NE-<timestamp base36>-<random>. La clienta pidió no tener que
+      // inventarlo a mano.
+      let skuFinal = form.sku.trim();
+      if (!skuFinal) {
+        const rand = Math.random().toString(36).slice(2, 5).toUpperCase();
+        const ts = Date.now().toString(36).toUpperCase();
+        skuFinal = `NE-${ts}-${rand}`;
+      }
 
       const codigoEnInput = form.codigo_barras.trim();
       const esIntManual = !!codigoEnInput && /^INT-/i.test(codigoEnInput) && !codigoGeneradoInterno;
@@ -272,7 +280,7 @@ export default function NuevoProductoPage() {
 
       // Pre-chequeo duplicado tolerante a fallos de red.
       try {
-        const duplicado = await productoExiste(form.sku, form.nombre);
+        const duplicado = await productoExiste(skuFinal, form.nombre);
         if (duplicado) {
           setErrorDuplicado(`Ya existe "${duplicado.nombre}" con SKU ${duplicado.sku}.`);
           try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {}
@@ -307,7 +315,7 @@ export default function NuevoProductoPage() {
         guardado = await saveProducto({
           nombre: form.nombre.trim().toUpperCase(),
           descripcion: form.descripcion.trim() || null,
-          sku: form.sku.trim().toUpperCase(),
+          sku: skuFinal.toUpperCase(),
           costo_promedio: parseFloat(form.costo_promedio) || 0,
           precio_venta: parseFloat(form.precio_venta) || 0,
           stock_actual: parseInt(form.stock_actual) || 0,
@@ -525,16 +533,16 @@ export default function NuevoProductoPage() {
           <div className="grid grid-cols-2 gap-6">
             <div>
               <label className={labelClass}>
-                SKU{tipoGastro === "reventa" ? "" : <span className="text-xs font-normal text-gray-400 ml-1">(opcional)</span>}
+                SKU <span className="text-xs font-normal text-gray-400 ml-1">(opcional — se genera automáticamente si lo dejás vacío)</span>
               </label>
               <input
                 type="text"
                 name="sku"
                 value={form.sku}
                 onChange={handleChange}
-                placeholder="Ej: OOTD-001"
+                placeholder="Dejar vacío para autogenerar"
                 className={`${inputClass} uppercase`}
-                required={tipoGastro === "reventa"}
+                required={false}
               />
             </div>
 

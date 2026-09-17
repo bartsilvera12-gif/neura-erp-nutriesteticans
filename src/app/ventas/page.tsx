@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import EdgeScrollArea from "@/components/ui/EdgeScrollArea";
 import { FancySelect } from "@/components/ui/FancySelect";
 import { getVentas } from "@/lib/ventas/storage";
+import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import type { Venta, TipoVenta, TipoIvaVenta } from "@/lib/ventas/types";
 import AnularVentaModal from "./AnularVentaModal";
 
@@ -16,13 +17,18 @@ function formatGs(valor: number) {
 
 function formatFecha(iso: string) {
   try {
-    const d    = new Date(iso);
-    const dd   = String(d.getDate()).padStart(2, "0");
-    const mm   = String(d.getMonth() + 1).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    const hh   = String(d.getHours()).padStart(2, "0");
-    const min  = String(d.getMinutes()).padStart(2, "0");
-    return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+    const d = new Date(iso);
+    const parts = new Intl.DateTimeFormat("es-PY", {
+      timeZone: "America/Asuncion",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(d);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}`;
   } catch {
     return iso;
   }
@@ -172,6 +178,34 @@ export default function VentasPage() {
   /** Venta cuya NR se esta emitiendo (spinner por fila). */
   const [remisionBusy, setRemisionBusy] = useState<string | null>(null);
   const [remisionError, setRemisionError] = useState<string | null>(null);
+  /** Venta que se está borrando (spinner por fila). */
+  const [eliminarBusy, setEliminarBusy] = useState<string | null>(null);
+
+  /**
+   * Elimina una venta desde el listado. Bajo el capot llama al mismo endpoint
+   * de anulación (reintegra stock + cierra CxC), con un motivo fijo. La
+   * facturación electrónica todavía no está integrada, así que este flujo es
+   * suficiente en el estado actual de Nutriestéticans.
+   */
+  async function eliminarVenta(ventaId: string, numeroControl: string) {
+    if (!confirm(`¿Eliminar la venta ${numeroControl}? Se reintegra el stock y se cierra la cuenta por cobrar.`)) return;
+    setEliminarBusy(ventaId);
+    try {
+      const res = await fetchWithSupabaseSession(`/api/ventas/${ventaId}/anular`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo: "Eliminación desde el listado de ventas." }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.success) throw new Error(j.error ?? "No se pudo eliminar la venta.");
+      const nuevas = await getVentas();
+      setTodas(nuevas);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Error al eliminar la venta.");
+    } finally {
+      setEliminarBusy(null);
+    }
+  }
 
   /**
    * NR de una venta en un clic: si ya hay una emitida vigente, la abre; si hay
@@ -513,15 +547,12 @@ export default function VentasPage() {
                               return (
                                 <button
                                   type="button"
-                                  onClick={() => setVentaAnular({ id: v.id, numero: v.numero_control })}
-                                  className="inline-flex items-center justify-center rounded-md border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 transition-colors"
-                                  title={
-                                    v.factura_id
-                                      ? "Anular venta y descartar factura (el DE nunca llegó a SET)"
-                                      : "Anular esta venta (reintegra stock)"
-                                  }
+                                  disabled={eliminarBusy === v.id}
+                                  onClick={() => eliminarVenta(v.id, v.numero_control)}
+                                  className="inline-flex items-center justify-center rounded-md border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                  title="Eliminar esta venta (reintegra stock y cierra CxC)"
                                 >
-                                  Anular
+                                  {eliminarBusy === v.id ? "..." : "Eliminar"}
                                 </button>
                               );
                             })()}
