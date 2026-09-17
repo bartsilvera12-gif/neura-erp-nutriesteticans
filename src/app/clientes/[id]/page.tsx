@@ -1080,24 +1080,7 @@ export default function ClienteDetailPage() {
           {(
             [
               { label: "Origen", value: cliente.origen },
-              {
-                label: "Tipo servicio",
-                value: etiquetaVisibleTipoServicio(
-                  cliente.tipo_servicio_cliente ?? null,
-                  labelTipoServicioMap
-                ),
-              },
               { label: "Condición", value: cliente.condicion_pago ?? "—" },
-              {
-                label: "Plan activo",
-                value: cargandoDetalleCliente ? (
-                  <span className="inline-block h-4 w-36 max-w-full animate-pulse rounded-md bg-slate-200" aria-hidden />
-                ) : suscripcionActiva ? (
-                  `${planes.find((p) => p.id === suscripcionActiva.plan_id)?.nombre ?? suscripcionActiva.plan_nombre ?? "Plan"} (${suscripcionActiva.moneda})`
-                ) : (
-                  "—"
-                ),
-              },
               { label: "Moneda", value: cliente.moneda_preferida ?? "GS" },
               {
                 label: "Vendedor",
@@ -1483,24 +1466,6 @@ export default function ClienteDetailPage() {
                       </button>
                     ))}
                   </div>
-                </div>
-
-                <div>
-                  <label className={labelClass}>Tipo de servicio</label>
-                  <select
-                    name="tipo_servicio_cliente"
-                    value={form.tipo_servicio_cliente}
-                    onChange={handleChange}
-                    className={inputClass}
-                  >
-                    <option value="">— Ninguno —</option>
-                    {opcionesTipoServicio.map((f) => (
-                      <option key={f.slug} value={f.slug}>
-                        {f.nombre}
-                        {!f.activo && (form.tipo_servicio_cliente || "").trim() === f.slug ? " (inactivo)" : ""}
-                      </option>
-                    ))}
-                  </select>
                 </div>
 
                 {form.tipo_cliente === "empresa" && (
