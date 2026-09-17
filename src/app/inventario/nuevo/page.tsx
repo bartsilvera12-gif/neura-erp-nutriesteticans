@@ -521,35 +521,6 @@ export default function NuevoProductoPage() {
             />
           </div>
 
-          {/* Tipo de producto: define cómo se comporta en ventas e inventario */}
-          <div>
-            <label className={labelClass}>Tipo de producto</label>
-            <div className="flex flex-wrap gap-2">
-              {([
-                { v: "reventa", t: "Reventa", d: "Se compra y se revende" },
-                { v: "repuesto", t: "Repuesto", d: "Se consume en reparaciones" },
-                { v: "servicio", t: "Servicio", d: "Mano de obra, sin stock" },
-              ] as const).map((o) => {
-                const on = form.tipo_producto === o.v;
-                return (
-                  <button
-                    key={o.v}
-                    type="button"
-                    onClick={() => setForm((prev) => ({ ...prev, tipo_producto: o.v }))}
-                    className={`rounded-xl border px-4 py-2.5 text-left transition-colors ${
-                      on
-                        ? "border-[#4FAEB2] bg-[#4FAEB2]/10 text-[#2F6E71]"
-                        : "border-slate-200 bg-white text-slate-600 hover:border-[#4FAEB2]/50"
-                    }`}
-                  >
-                    <span className="block text-sm font-semibold">{o.t}</span>
-                    <span className="block text-xs text-slate-400">{o.d}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
           {/* SKU + Unidad de medida */}
           <div className="grid grid-cols-2 gap-6">
             <div>
