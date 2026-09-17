@@ -1429,9 +1429,8 @@ export default function NuevaVentaPage() {
             <SectionTitle>Productos en esta venta</SectionTitle>
             <div className="flex shrink-0 items-center gap-2">
               {/* Ítem sin catálogo: descripción / cantidad / precio a mano.
-                  Usar para ventas ad-hoc (ganadería: un animal por línea, con su
-                  peso/precio negociado; servicios; ítems que no vale la pena
-                  cargar al catálogo). No toca stock. */}
+                  Usar para ventas ad-hoc (servicios que se cobran al momento,
+                  conceptos ocasionales, etc.). No toca stock. */}
               <button
                 type="button"
                 onClick={agregarItemManual}
@@ -1441,6 +1440,52 @@ export default function NuevaVentaPage() {
                 + Ítem manual
               </button>
             </div>
+          </div>
+
+          {/* Buscador de productos del catálogo: escribí 2+ letras, elegí de la
+              lista (o navegá con ↑/↓/Enter) y la línea se agrega al carrito. */}
+          <div className="relative mb-3" ref={comboContainerRef}>
+            <input
+              ref={comboInputRef}
+              type="text"
+              value={comboQuery}
+              onChange={(e) => { setComboQuery(e.target.value); setComboOpen(true); setComboHighlight(-1); }}
+              onFocus={() => setComboOpen(true)}
+              onKeyDown={onComboKeyDown}
+              placeholder="Buscar producto o servicio del catálogo (nombre o SKU)…"
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-[#0EA5E9]"
+            />
+            {comboOpen && comboQuery.trim().length >= 2 && (
+              <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                {comboBuscando && (
+                  <div className="px-3 py-2 text-xs text-slate-400">Buscando…</div>
+                )}
+                {!comboBuscando && comboResultados.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-slate-400">
+                    Sin resultados. Podés cargar el concepto como <span className="font-semibold">Ítem manual</span>.
+                  </div>
+                )}
+                {comboResultados.map((p, i) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onMouseEnter={() => setComboHighlight(i)}
+                    onClick={() => agregarProductoRapido(p)}
+                    className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${
+                      i === comboHighlight ? "bg-[#0EA5E9]/10" : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-slate-800">{p.nombre}</p>
+                      <p className="font-mono text-[11px] text-slate-500">{p.sku}</p>
+                    </div>
+                    <span className="shrink-0 text-xs text-slate-500">
+                      Gs. {Math.round(p.precio_venta).toLocaleString("es-PY")}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {items.length === 0 ? (
