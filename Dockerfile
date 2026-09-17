@@ -69,8 +69,15 @@ ENV HOSTNAME=0.0.0.0
 # y descarta el deploy aunque la app esté sirviendo bien.
 # Limpiamos apt lists para no engordar la capa.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg curl \
+    && apt-get install -y --no-install-recommends ffmpeg curl tzdata \
+    && ln -fs /usr/share/zoneinfo/America/Asuncion /etc/localtime \
+    && dpkg-reconfigure --frontend noninteractive tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+# Zona horaria de la instancia: Paraguay. Node.js y libc leen esta variable
+# antes que cualquier configuración por defecto, así que `new Date()` en el
+# server y toda función que use la TZ del sistema devuelven hora local PY.
+ENV TZ=America/Asuncion
 
 # Usuario no-root (buena práctica; standalone no necesita root).
 RUN groupadd --system --gid 1001 nodejs \

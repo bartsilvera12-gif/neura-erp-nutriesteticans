@@ -175,9 +175,6 @@ export default function VentasPage() {
   const [filtroTipo, setFiltroTipo] = useState<TipoVenta | "">("");
   const [filtroIva,  setFiltroIva]  = useState<TipoIvaVenta | "">("");
   const [ventaAnular, setVentaAnular] = useState<{ id: string; numero: string } | null>(null);
-  /** Venta cuya NR se esta emitiendo (spinner por fila). */
-  const [remisionBusy, setRemisionBusy] = useState<string | null>(null);
-  const [remisionError, setRemisionError] = useState<string | null>(null);
   /** Venta que se está borrando (spinner por fila). */
   const [eliminarBusy, setEliminarBusy] = useState<string | null>(null);
 
@@ -204,51 +201,6 @@ export default function VentasPage() {
       alert(e instanceof Error ? e.message : "Error al eliminar la venta.");
     } finally {
       setEliminarBusy(null);
-    }
-  }
-
-  /**
-   * NR de una venta en un clic: si ya hay una emitida vigente, la abre; si hay
-   * varias, manda al listado; si no hay ninguna, entrega todo el pendiente y
-   * abre el PDF nuevo. Para entregas parciales editables, se va al listado.
-   */
-  async function emitirRemision(ventaId: string) {
-    setRemisionBusy(ventaId);
-    setRemisionError(null);
-    try {
-      const res = await fetchWithSupabaseSession(`/api/ventas/${ventaId}/remisiones`, { cache: "no-store" });
-      const j = await res.json();
-      if (!res.ok || !j.success) throw new Error(j.error ?? "No se pudo leer la venta.");
-
-      const emitidas = (j.data?.remisiones ?? []) as Array<{ id: string; estado: string }>;
-      const vigentes = emitidas.filter((r) => r.estado !== "anulada");
-      if (vigentes.length > 1) {
-        window.location.href = "/notas-remision";
-        return;
-      }
-      if (vigentes.length === 1) {
-        window.open(`/api/ventas/remisiones/${vigentes[0]!.id}/pdf?auto=1`, "_blank", "noopener");
-        return;
-      }
-
-      const lineas = (j.data?.resumen?.lineas ?? []) as Array<{ venta_item_id: string; pendiente: number }>;
-      const items = lineas
-        .filter((l) => Number(l.pendiente) > 0)
-        .map((l) => ({ venta_item_id: l.venta_item_id, cantidad: Number(l.pendiente) }));
-      if (items.length === 0) throw new Error("Esta venta no tiene nada pendiente de remitir.");
-
-      const crear = await fetchWithSupabaseSession(`/api/ventas/${ventaId}/remisiones`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items }),
-      });
-      const jc = await crear.json();
-      if (!crear.ok || !jc.success) throw new Error(jc.error ?? "No se pudo generar la nota de remision.");
-      window.open(`/api/ventas/remisiones/${jc.data.remision_id}/pdf?auto=1`, "_blank", "noopener");
-    } catch (e) {
-      setRemisionError(e instanceof Error ? e.message : "Error al generar la nota de remision.");
-    } finally {
-      setRemisionBusy(null);
     }
   }
 
@@ -529,34 +481,23 @@ export default function VentasPage() {
                             Anulada
                           </span>
                         ) : (
-                          <div className="inline-flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={remisionBusy === v.id}
-                              onClick={() => emitirRemision(v.id)}
-                              className="inline-flex items-center justify-center rounded-md border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                              title="Emitir / abrir nota de remision de esta venta"
-                            >
-                              {remisionBusy === v.id ? "..." : "Emitir NR"}
-                            </button>
-                            {(() => {
-                              const est = v.factura_estado_sifen;
-                              const facturaBloqueaAnular =
-                                est === "aprobado" || est === "enviado" || est === "en_proceso";
-                              if (v.factura_id && facturaBloqueaAnular) return null;
-                              return (
-                                <button
-                                  type="button"
-                                  disabled={eliminarBusy === v.id}
-                                  onClick={() => eliminarVenta(v.id, v.numero_control)}
-                                  className="inline-flex items-center justify-center rounded-md border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                                  title="Eliminar esta venta (reintegra stock y cierra CxC)"
-                                >
-                                  {eliminarBusy === v.id ? "..." : "Eliminar"}
-                                </button>
-                              );
-                            })()}
-                          </div>
+                          (() => {
+                            const est = v.factura_estado_sifen;
+                            const facturaBloqueaAnular =
+                              est === "aprobado" || est === "enviado" || est === "en_proceso";
+                            if (v.factura_id && facturaBloqueaAnular) return null;
+                            return (
+                              <button
+                                type="button"
+                                disabled={eliminarBusy === v.id}
+                                onClick={() => eliminarVenta(v.id, v.numero_control)}
+                                className="inline-flex items-center justify-center rounded-md border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                title="Eliminar esta venta (reintegra stock y cierra CxC)"
+                              >
+                                {eliminarBusy === v.id ? "..." : "Eliminar"}
+                              </button>
+                            );
+                          })()
                         )}
                       </td>
                     </tr>
