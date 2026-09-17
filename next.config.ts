@@ -8,8 +8,11 @@ const nextConfig: NextConfig = {
   // si Coolify/Traefik intentan re-comprimir).
   compress: true,
 
-  // NO usamos output: "standalone": Coolify+Nixpacks corre `next start` con .next/
-  // regular, no usa .next/standalone/.
+  // Salida standalone: genera .next/standalone con server.js y solo el subconjunto
+  // de node_modules necesario. La imagen final (Dockerfile propio) deja de arrastrar
+  // todo el proyecto → "exporting layers" mucho más corta. Arranca con
+  // `node server.js` (no `next start`), como espera el Dockerfile.
+  output: "standalone",
 
   experimental: {
     optimizePackageImports: ["lucide-react", "recharts"],
