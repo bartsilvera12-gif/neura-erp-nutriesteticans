@@ -107,10 +107,17 @@ function modalidadLabel(m: string | null | undefined): string {
 }
 
 function metodoPagoLabel(m: string | null | undefined): string {
-  if (m === "tarjeta") return "Tarjeta";
-  if (m === "transferencia") return "Transferencia";
-  if (m === "efectivo") return "Efectivo";
-  return "—";
+  switch (m) {
+    case "efectivo":     return "Efectivo";
+    case "transferencia":return "Transferencia";
+    case "tarjeta":      return "Tarjeta";
+    case "qr":           return "QR";
+    case "billetera":    return "Billetera";
+    case "saldo_favor":  return "Saldo a favor";
+    case "mixto":        return "Mixto";
+    case "otro":         return "Otro";
+    default:             return "—";
+  }
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -149,6 +156,14 @@ interface PedidoBrief {
 
 // ── Render de cada copia ───────────────────────────────────────────────────
 
+interface PagoDetalleTicket {
+  metodo_pago: string;
+  entidad_nombre_snapshot: string | null;
+  monto: number | string;
+  referencia: string | null;
+  titular: string | null;
+}
+
 function renderCopia(opts: {
   tipo: "cliente" | "pizzeria" | "plancha";
   venta: VentaRow;
@@ -156,8 +171,9 @@ function renderCopia(opts: {
   brief: PedidoBrief | null;
   fontPx: number;
   isLast: boolean;
+  pagos: PagoDetalleTicket[];
 }): string {
-  const { tipo, venta, items, brief, fontPx, isLast } = opts;
+  const { tipo, venta, items, brief, fontPx, isLast, pagos } = opts;
   const showPrices = tipo === "cliente";
   const sectorBadge = tipo === "pizzeria" ? "COMANDA PIZZERÍA" : tipo === "plancha" ? "COMANDA PLANCHA" : "";
   const modalidad = modalidadLabel(brief?.modalidad);
@@ -205,6 +221,28 @@ function renderCopia(opts: {
   const headerCocina = sectorBadge
     ? `<div class="sector-banner">${sectorBadge}</div>`
     : "";
+  // Filas de detalle de cobro: entidad, N° de comprobante y titular cuando aplique.
+  // Si hay varias líneas (pago mixto) se listan todas.
+  const pagoDetalleRows = pagos.length > 0
+    ? pagos.map((p) => {
+        const lines: string[] = [
+          `<tr><td class="lbl">Pago</td><td class="val">${metodoPagoLabel(p.metodo_pago)}${
+            pagos.length > 1 ? ` (${formatGs(Number(p.monto))})` : ""
+          }</td></tr>`,
+        ];
+        if (p.entidad_nombre_snapshot) {
+          lines.push(`<tr><td class="lbl">Entidad</td><td class="val">${escapeHtml(p.entidad_nombre_snapshot)}</td></tr>`);
+        }
+        if (p.referencia) {
+          lines.push(`<tr><td class="lbl">Comprob.</td><td class="val">${escapeHtml(p.referencia)}</td></tr>`);
+        }
+        if (p.titular) {
+          lines.push(`<tr><td class="lbl">Titular</td><td class="val">${escapeHtml(p.titular)}</td></tr>`);
+        }
+        return lines.join("");
+      }).join("")
+    : `<tr><td class="lbl">Pago</td><td class="val">${metodoPagoLabel(venta.metodo_pago)}</td></tr>`;
+
   const totalesHtml = showPrices
     ? `<hr>
        <table class="totales">
@@ -212,7 +250,7 @@ function renderCopia(opts: {
            <tr><td class="lbl">Subtotal</td><td class="val">${formatGs(subtotal)}</td></tr>
            ${ivaTotal > 0 ? `<tr><td class="lbl">IVA</td><td class="val">${formatGs(ivaTotal)}</td></tr>` : ""}
            <tr class="total-row"><td class="lbl">TOTAL</td><td class="val">${formatGs(total)}</td></tr>
-           <tr><td class="lbl">Pago</td><td class="val">${metodoPagoLabel(venta.metodo_pago)}</td></tr>
+           ${pagoDetalleRows}
          </tbody>
        </table>`
     : "";
@@ -274,6 +312,27 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
     .eq("empresa_id", empresaId);
   if (iQ.error) return new NextResponse(`Error items: ${iQ.error.message}`, { status: 500 });
   const itemsRaw = (iQ.data ?? []) as unknown as ItemRow[];
+
+  // Detalle(s) de pago — para mostrar entidad, referencia y titular en el ticket.
+  // Best-effort: si falla, el ticket sale igual sin el bloque de cobro extendido.
+  let pagoDetalles: Array<{
+    metodo_pago: string;
+    entidad_nombre_snapshot: string | null;
+    monto: number | string;
+    referencia: string | null;
+    titular: string | null;
+  }> = [];
+  try {
+    const pdQ = await ctx.supabase
+      .from("ventas_pagos_detalle")
+      .select("metodo_pago, entidad_nombre_snapshot, monto, referencia, titular, created_at")
+      .eq("empresa_id", empresaId)
+      .eq("venta_id", id)
+      .order("created_at", { ascending: true });
+    if (!pdQ.error) {
+      pagoDetalles = (pdQ.data ?? []) as typeof pagoDetalles;
+    }
+  } catch { /* ignore */ }
 
   // Pedido cocina (opcional) — busca card de Pedidos vinculada a esta venta.
   let brief: PedidoBrief | null = null;
@@ -356,7 +415,15 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
 
   const seccionesHtml = copias
     .map((tipo, idx) =>
-      renderCopia({ tipo, venta, items, brief, fontPx, isLast: idx === copias.length - 1 })
+      renderCopia({
+        tipo,
+        venta,
+        items,
+        brief,
+        fontPx,
+        isLast: idx === copias.length - 1,
+        pagos: pagoDetalles,
+      })
     )
     .join("");
 

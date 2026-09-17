@@ -215,6 +215,19 @@ function NuevoClienteForm() {
     if (!form.nombre_contacto.trim())                              return setError("El nombre de contacto es obligatorio.");
     if (form.tipo_cliente === "empresa" && !form.empresa.trim())   return setError("La razón social es obligatoria para empresas.");
 
+    // Nombre solo letras (incluye acentos, ñ, espacios y separadores comunes).
+    if (!/^[A-Za-zÀ-ÿÑñ\s'.\-]+$/.test(form.nombre_contacto.trim())) {
+      return setError("El nombre no puede contener números ni símbolos. Ingresá solo letras.");
+    }
+
+    // Validación del RUC/documento cuando el cliente es empresa: formato 1234567-8
+    // (6 a 8 dígitos, guión, dígito verificador).
+    if (form.tipo_cliente === "empresa" && form.ruc.trim()) {
+      if (!/^\d{6,8}-\d$/.test(form.ruc.trim())) {
+        return setError("Los datos ingresados del RUC son incorrectos, seguí el formato ej: 1234567-8");
+      }
+    }
+
     if (form.condicion_pago === "MENSUAL" && form.estado === "activo") {
       const dur = parseInt(formSusc.duracion_meses, 10) || 0;
       const diaFac = parseInt(formSusc.dia_facturacion, 10) || 0;
@@ -501,7 +514,7 @@ function NuevoClienteForm() {
                     name="ruc"
                     value={form.ruc}
                     onChange={handleChange}
-                    placeholder="00000000-0"
+                    placeholder="Ej: 1234567-8"
                     className={inputClass}
                   />
                 ) : (

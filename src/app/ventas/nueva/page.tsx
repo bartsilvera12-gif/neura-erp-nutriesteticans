@@ -941,6 +941,21 @@ export default function NuevaVentaPage() {
         return;
       }
     }
+    // Transferencia: exigir titular + N° de comprobante para validar la
+    // transacción antes de cerrar la venta (pedido explícito de QA — la venta
+    // no se debe procesar sin la referencia del comprobante).
+    if (metodoPago === "transferencia") {
+      if (!pagoTitular.trim()) {
+        setCobroError("Indicá el titular que hizo la transferencia.");
+        setCobroModalOpen(true);
+        return;
+      }
+      if (!pagoReferencia.trim()) {
+        setCobroError("Cargá el N° de comprobante para validar la transferencia.");
+        setCobroModalOpen(true);
+        return;
+      }
+    }
 
     // Cobro mixto: la suma de las líneas debe cubrir el total a cobrar y cada
     // línea que no sea efectivo necesita su entidad/banco.
@@ -2003,14 +2018,24 @@ export default function NuevaVentaPage() {
 
             {metodoPago === "transferencia" && (
               <div>
-                <label className="block text-xs text-gray-600 mb-1">Titular que transfirió</label>
+                <label className="block text-xs text-gray-600 mb-1">
+                  Titular que transfirió <span className="text-rose-500">*</span>
+                </label>
                 <input type="text" value={pagoTitular} onChange={(e) => setPagoTitular(e.target.value)} placeholder="Nombre del titular" className={inputClass} />
               </div>
             )}
 
             <div>
-              <label className="block text-xs text-gray-600 mb-1">N° de comprobante / referencia</label>
+              <label className="block text-xs text-gray-600 mb-1">
+                N° de comprobante / referencia
+                {metodoPago === "transferencia" && <span className="text-rose-500"> *</span>}
+              </label>
               <input type="text" value={pagoReferencia} onChange={(e) => setPagoReferencia(e.target.value)} placeholder="Comprobante / transacción" className={inputClass} />
+              {metodoPago === "transferencia" && (
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Validá la transferencia antes de cerrar la venta. Ingresá el N° del comprobante que te muestra la app del banco.
+                </p>
+              )}
             </div>
 
             {cobroError && (
@@ -2027,6 +2052,16 @@ export default function NuevaVentaPage() {
                     ? "Seleccioná la entidad / banco / POS de la lista."
                     : "Seleccioná la entidad / banco de la lista.");
                   return;
+                }
+                if (metodoPago === "transferencia") {
+                  if (!pagoTitular.trim()) {
+                    setCobroError("Indicá el titular que hizo la transferencia.");
+                    return;
+                  }
+                  if (!pagoReferencia.trim()) {
+                    setCobroError("Cargá el N° de comprobante para validar la transferencia.");
+                    return;
+                  }
                 }
                 setCobroError(null);
                 setCobroModalOpen(false);
