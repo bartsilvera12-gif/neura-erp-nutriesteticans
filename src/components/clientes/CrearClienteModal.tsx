@@ -60,6 +60,18 @@ export default function CrearClienteModal({
       setErr("La razón social es obligatoria para empresas.");
       return;
     }
+    // Nombre solo letras.
+    if (!/^[A-Za-zÀ-ÿÑñ\s'.\-]+$/.test(contacto.trim())) {
+      setErr("El nombre no puede contener números ni símbolos. Ingresá solo letras.");
+      return;
+    }
+    // RUC (empresa): formato 1234567-8.
+    if (tipo === "empresa" && ruc.trim()) {
+      if (!/^\d{6,8}-\d$/.test(ruc.trim())) {
+        setErr("Los datos ingresados del RUC son incorrectos, seguí el formato ej: 1234567-8");
+        return;
+      }
+    }
     setBusy(true);
     try {
       const res = await apiCreateCliente({
@@ -143,7 +155,7 @@ export default function CrearClienteModal({
             <div>
               <label className={labelClass}>{tipo === "empresa" ? "RUC" : "CI / Documento"}</label>
               {tipo === "empresa" ? (
-                <input className={inputClass} value={ruc} onChange={(e) => setRuc(e.target.value)} placeholder="80000000-1" />
+                <input className={inputClass} value={ruc} onChange={(e) => setRuc(e.target.value)} placeholder="Ej: 1234567-8" />
               ) : (
                 <input className={inputClass} value={documento} onChange={(e) => setDocumento(e.target.value)} placeholder="Documento" />
               )}

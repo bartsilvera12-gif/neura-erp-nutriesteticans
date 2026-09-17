@@ -527,6 +527,14 @@ export default function ClienteDetailPage() {
     setFormError(null);
     if (!form.nombre_contacto.trim())                             return setFormError("El contacto es obligatorio.");
     if (form.tipo_cliente === "empresa" && !form.empresa.trim())  return setFormError("La razón social es obligatoria para empresas.");
+    if (!/^[A-Za-zÀ-ÿÑñ\s'.\-]+$/.test(form.nombre_contacto.trim())) {
+      return setFormError("El nombre no puede contener números ni símbolos. Ingresá solo letras.");
+    }
+    if (form.tipo_cliente === "empresa" && form.ruc.trim()) {
+      if (!/^\d{6,8}-\d$/.test(form.ruc.trim())) {
+        return setFormError("Los datos ingresados del RUC son incorrectos, seguí el formato ej: 1234567-8");
+      }
+    }
 
     // Solo validar creación de suscripción cuando: MENSUAL + activo + NO tiene suscripciones
     if (form.condicion_pago === "MENSUAL" && form.estado === "activo" && suscripciones.length === 0) {
