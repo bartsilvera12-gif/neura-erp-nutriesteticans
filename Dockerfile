@@ -36,6 +36,16 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
+# Variables NEXT_PUBLIC_*: Next las incrusta en el bundle del navegador al compilar, asi que
+# tienen que existir en ESTA etapa. Coolify las pasa como build args.
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ARG NEXT_PUBLIC_NEURA_CLIENT_SCHEMA
+ARG NEXT_PUBLIC_SUPER_ADMIN_EMAILS
+ARG NEXT_PUBLIC_WHATSAPP_LINK_PHONE_NUMBER
+ARG NEXT_PUBLIC_CHAT_LIST_DEBUG
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \n    NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY \n    NEXT_PUBLIC_NEURA_CLIENT_SCHEMA=$NEXT_PUBLIC_NEURA_CLIENT_SCHEMA \n    NEXT_PUBLIC_SUPER_ADMIN_EMAILS=$NEXT_PUBLIC_SUPER_ADMIN_EMAILS \n    NEXT_PUBLIC_WHATSAPP_LINK_PHONE_NUMBER=$NEXT_PUBLIC_WHATSAPP_LINK_PHONE_NUMBER \n    NEXT_PUBLIC_CHAT_LIST_DEBUG=$NEXT_PUBLIC_CHAT_LIST_DEBUG
+
 # Cache mount en .next/cache: acá vive el caché incremental del compilador de Next.
 # Persiste en el builder entre deploys, así Next recompila solo lo que cambió en
 # vez de las ~984 páginas desde cero. Es la optimización de mayor impacto.
