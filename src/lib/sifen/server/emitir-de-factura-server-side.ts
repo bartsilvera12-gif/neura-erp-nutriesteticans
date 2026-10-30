@@ -33,6 +33,7 @@ export interface EmitirDeResult {
 }
 
 const ESTADOS_FINALIZADOS = new Set<string>(["aprobado", "cancelado"]);
+const ESPERAS_CONSULTA_LOTE_MS = [2000, 3000, 4000, 5000, 5000, 8000, 10000, 15000, 20000];
 
 /** Invoca un handler SIFEN (enviar / consulta-lote) server-side y parsea su JSON. */
 async function llamarHandler(
@@ -99,9 +100,15 @@ async function enviarYConsultarEnSegundoPlano(
   try {
     const envio = await llamarHandler(handleSifenEnviarPost, auth, supabase, facturaId);
     if (!envio.success) return; // error_envio: reintentable
-    const estado = String(envio.data?.factura_electronica?.estado_sifen ?? "");
-    if (estado === "enviado") {
-      await llamarHandler(handleSifenConsultaLotePost, auth, supabase, facturaId);
+    if (String(envio.data?.factura_electronica?.estado_sifen ?? "") !== "enviado") return;
+
+    // El SET procesa el lote de forma asíncrona: la primera consulta suele volver
+    // sin resultado, así que se reintenta hasta que deje de estar "enviado".
+    for (const esperaMs of ESPERAS_CONSULTA_LOTE_MS) {
+      await new Promise((resolve) => setTimeout(resolve, esperaMs));
+      const consulta = await llamarHandler(handleSifenConsultaLotePost, auth, supabase, facturaId);
+      const estado = consulta.data?.factura_electronica?.estado_sifen;
+      if (consulta.success && estado && estado !== "enviado") return;
     }
   } catch (e) {
     console.error("[emitirDE bg] enviar/consulta:", e instanceof Error ? e.message : e);

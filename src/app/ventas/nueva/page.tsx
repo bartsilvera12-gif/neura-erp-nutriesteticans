@@ -9,6 +9,7 @@ import ProductPickerModal, { type ProductoPickerItem, type AgregarVentaPayload }
 import { saveVenta, type FaltanteStock } from "@/lib/ventas/storage";
 import { getProductos } from "@/lib/inventario/storage";
 import CrearClienteModal, { type ClienteCreado } from "@/components/clientes/CrearClienteModal";
+import FacturacionProgressOverlay, { type FacturacionProgreso } from "@/components/ventas/FacturacionProgressOverlay";
 import { apiCreateCliente } from "@/lib/api/client";
 import type { ConsultaRucSetOk } from "@/lib/set/use-consulta-ruc";
 import { generarYAbrirRecibo } from "@/lib/recibos/client";
@@ -152,7 +153,8 @@ export default function NuevaVentaPage() {
   const [items, setItems]           = useState<LineaVenta[]>([]);
   const [errorLinea, setErrorLinea] = useState<string | null>(null);
   const [errorVenta, setErrorVenta] = useState<string | null>(null);
-  const [emitirFactura, setEmitirFactura] = useState(false);
+  const [emitirFactura, setEmitirFactura] = useState(true);
+  const [facturacionProgreso, setFacturacionProgreso] = useState<FacturacionProgreso | null>(null);
   // Venta sin stock: faltantes devueltos por el backend + modal de confirmación.
   const [faltantes, setFaltantes] = useState<FaltanteStock[]>([]);
   const [confirmSinStockOpen, setConfirmSinStockOpen] = useState(false);
@@ -986,13 +988,23 @@ export default function NuevaVentaPage() {
     // salía sola. Se abre en blanco y luego se la manda al documento.
     // Declarada fuera del try para poder cerrarla en el finally.
     let ventanaDoc: Window | null = null;
+    let pasoFirmaTimer: ReturnType<typeof setTimeout> | null = null;
     try {
       // El cliente se elige (o se crea con el modal "Crear cliente") antes de
       // confirmar. Si no hay ninguno, la venta se registra sin cliente.
       const clienteIdFinal = clienteId;
 
+      // Con factura no se pre-abre: la pestaña nueva taparía el progreso, y el
+      // documento se ofrece recién cuando la SET responde.
+      if (emitirFactura) {
+        setFacturacionProgreso({ fase: "procesando", paso: "venta" });
+        pasoFirmaTimer = setTimeout(
+          () => setFacturacionProgreso({ fase: "procesando", paso: "firma" }),
+          900
+        );
+      }
       try {
-        ventanaDoc = window.open("", "_blank");
+        ventanaDoc = emitirFactura ? null : window.open("", "_blank");
         if (ventanaDoc) {
           ventanaDoc.document.write(
             `<!doctype html><meta charset="utf-8"><title>Preparando documento…</title>` +
@@ -1045,7 +1057,10 @@ export default function NuevaVentaPage() {
         }
       );
 
+      if (pasoFirmaTimer) clearTimeout(pasoFirmaTimer);
+
       if (!resultado.success) {
+        setFacturacionProgreso(null);
         // La venta no se registró: se cierra la ventana que se había abierto
         // para el documento, si no queda una pestaña vacía dando vueltas.
         try { ventanaDoc?.close(); } catch {}
@@ -1076,6 +1091,51 @@ export default function NuevaVentaPage() {
       const fact = resultado.facturacion;
       const kudeUrl = fact?.kude_disponible && fact.kude_url ? fact.kude_url : null;
       const docUrl = kudeUrl ?? ticketUrl;
+
+      if (emitirFactura) {
+        const base = {
+          numeroFactura: fact?.numero_factura ?? null,
+          facturaId: fact?.factura_id ?? null,
+          kudeUrl,
+          ticketUrl,
+        };
+        if (!kudeUrl || !fact?.factura_id) {
+          const motivo = fact?.error
+            ? fact.error
+            : fact?.estado_de
+              ? `El documento quedó en estado "${fact.estado_de}".`
+              : "La empresa no está en modo SIFEN o falta configuración (certificado / timbrado / punto de expedición).";
+          setFacturacionProgreso({
+            ...base,
+            fase: "error",
+            titulo: "La venta se registró, pero no se emitió la factura",
+            mensaje: motivo,
+          });
+          return;
+        }
+        setFacturacionProgreso({ fase: "procesando", paso: "set" });
+        const final = await esperarRespuestaSet(fact.factura_id);
+        if (final.estado === "aprobado") {
+          setFacturacionProgreso({ ...base, fase: "aprobada" });
+        } else if (final.estado === "enviado" || final.estado === "firmado") {
+          setFacturacionProgreso({
+            ...base,
+            fase: "pendiente",
+            titulo: "La SET todavía no respondió",
+            mensaje: "La venta y la factura quedaron registradas. Revisá el estado en unos minutos desde el detalle de la factura.",
+          });
+        } else {
+          setFacturacionProgreso({
+            ...base,
+            fase: "error",
+            titulo: final.estado === "rechazado" ? "La SET rechazó la factura" : "No se pudo enviar la factura a la SET",
+            mensaje: final.error ?? "La venta quedó registrada. Podés reintentar desde el detalle de la factura.",
+            kudeUrl: null,
+          });
+        }
+        return;
+      }
+
       if (ventanaDoc && !ventanaDoc.closed) {
         try { ventanaDoc.location.replace(docUrl); }
         catch { try { window.open(docUrl, "_blank", "noopener"); } catch {} }
@@ -1084,35 +1144,42 @@ export default function NuevaVentaPage() {
       }
       if (generaNota) { try { window.open(remisionUrl, "_blank", "noopener"); } catch {} }
 
-      // Si el cajero pidió Factura y el pipeline SIFEN no llegó a emitir el KUDE,
-      // frenar acá y mostrar el motivo. Sin este aviso el sistema abre el ticket
-      // interno en silencio y el cajero no se entera de que la factura NO se hizo.
-      if (emitirFactura && !kudeUrl) {
-        const motivo = fact?.error
-          ? fact.error
-          : fact?.estado_de
-            ? `El DE quedó en estado "${fact.estado_de}" y no hay KUDE disponible todavía.`
-            : "La empresa no está en modo SIFEN o falta configuración (certificado / timbrado / punto de expedición).";
-        setErrorVenta(
-          `La venta ${v.numero_control ?? ""} quedó registrada, pero NO se emitió la factura electrónica. ` +
-          `Se abrió el ticket interno como comprobante. Motivo: ${motivo}`
-        );
-        ventanaDoc = null;
-        return;
-      }
-
       // Redirige directo al listado de ventas en lugar de mostrar el modal
       // post-venta. El cajero queda libre para registrar otra venta de
       // inmediato. El ticket sigue accesible desde el listado.
       router.push("/ventas");
       ventanaDoc = null; // ya navegó al documento: el finally no debe cerrarla
+    } catch (e) {
+      setFacturacionProgreso(null);
+      throw e;
     } finally {
+      if (pasoFirmaTimer) clearTimeout(pasoFirmaTimer);
       // Si quedó abierta sin destino (excepción inesperada), se cierra.
       try { ventanaDoc?.close(); } catch {}
       // Liberar el guard SIEMPRE: éxito, error o flujo de "confirmar sin stock".
       isSubmittingRef.current = false;
       setGuardando(false);
     }
+  }
+
+  /** Sigue el estado del DE mientras el servidor lo envía y consulta a la SET. */
+  async function esperarRespuestaSet(facturaId: string): Promise<{ estado: string; error: string | null }> {
+    const limite = Date.now() + 75_000;
+    let ultimo = { estado: "enviado", error: null as string | null };
+    while (Date.now() < limite) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      try {
+        const res = await fetchWithSupabaseSession(`/api/facturas/${facturaId}/sifen/resumen`, { cache: "no-store" });
+        const j = await res.json();
+        const fe = j?.data?.factura_electronica;
+        if (!res.ok || !j?.success || !fe) continue;
+        ultimo = { estado: String(fe.estado_sifen), error: fe.error ?? null };
+        if (ultimo.estado !== "enviado" && ultimo.estado !== "firmado") return ultimo;
+      } catch {
+        // Un corte de red momentáneo no debe cortar el seguimiento.
+      }
+    }
+    return ultimo;
   }
 
   // Confirmar SOLO por click en el botón (no con Enter): el <form> ignora el
@@ -1988,6 +2055,14 @@ export default function NuevaVentaPage() {
         </div>
 
       </form>
+
+      {facturacionProgreso && (
+        <FacturacionProgressOverlay
+          progreso={facturacionProgreso}
+          onNuevaVenta={() => window.location.assign("/ventas/nueva")}
+          onVerVentas={() => router.push("/ventas")}
+        />
+      )}
 
       <ProductPickerModal
         open={pickerOpen}
