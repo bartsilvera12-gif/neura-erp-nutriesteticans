@@ -1058,6 +1058,7 @@ function DashFinanciero({
   mapNombreTipoServicio: Readonly<Record<string, string>>;
 }) {
   const { desde, hasta } = useMemo(() => getRango(periodo), [periodo]);
+  const mesActual = useMemo(() => getRango("mes"), []);
 
   // Bloque principal: métricas del período (misma ventana que el filtro superior: enRango + fechas calendario)
   const facturasValidas = facturas.filter((f) => !esFacturaAnulada(f.estado));
@@ -1575,7 +1576,7 @@ function DashFinanciero({
               variant="light"
               label="Ventas mensuales"
               value={ventas
-                .filter((v) => enMesCalendarioActual(toCalendarDateStr(v.fecha)))
+                .filter((v) => enRango(v.fecha, mesActual.desde, mesActual.hasta))
                 .reduce((s, v) => {
                   const t = Number(v.total);
                   return s + (Number.isFinite(t) ? t : 0);

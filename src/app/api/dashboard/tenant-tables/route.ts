@@ -3,6 +3,7 @@ import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
+import { asuncionRangeBoundsUtc } from "@/lib/fechas/asuncion-bounds";
 import { ymdInicioFinMesLocal } from "@/lib/fechas/calendario";
 import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
 import {
@@ -15,7 +16,7 @@ import {
  * Solo se aplica si vienen `?desde=YYYY-MM-DD&hasta=YYYY-MM-DD` válidos.
  * Backward compatible: sin params, el endpoint trae todo el histórico (comportamiento previo).
  */
-type DateRange = { desde: string; hasta: string } | null;
+type DateRange = { inicio: string; fin: string } | null;
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -25,7 +26,10 @@ function parseDateRangeFromQuery(sp: URLSearchParams): DateRange {
   if (!desde || !hasta) return null;
   if (!YMD_RE.test(desde) || !YMD_RE.test(hasta)) return null;
   if (desde > hasta) return null;
-  return { desde, hasta };
+  // Límites con hora: comparar un timestamptz contra "YYYY-MM-DD" corta en la
+  // medianoche UTC y deja afuera todo lo registrado en el último día del rango.
+  const { start, end } = asuncionRangeBoundsUtc(desde, hasta);
+  return { inicio: start, fin: end };
 }
 
 /**
@@ -67,8 +71,8 @@ async function fallbackComprasPg(
     const t = quoteSchemaTable(schema, "compras");
     if (range) {
       const { rows } = await pool.query(
-        `SELECT * FROM ${t} WHERE empresa_id = $1::uuid AND fecha >= $2::date AND fecha < ($3::date + 1)`,
-        [empresaId, range.desde, range.hasta]
+        `SELECT * FROM ${t} WHERE empresa_id = $1::uuid AND fecha >= $2::timestamptz AND fecha <= $3::timestamptz`,
+        [empresaId, range.inicio, range.fin]
       );
       return rows;
     }
@@ -98,8 +102,8 @@ async function fallbackVentasPg(
     const t = quoteSchemaTable(schema, "ventas");
     if (range) {
       const { rows } = await pool.query(
-        `SELECT * FROM ${t} WHERE empresa_id = $1::uuid AND fecha >= $2::date AND fecha < ($3::date + 1)`,
-        [empresaId, range.desde, range.hasta]
+        `SELECT * FROM ${t} WHERE empresa_id = $1::uuid AND fecha >= $2::timestamptz AND fecha <= $3::timestamptz`,
+        [empresaId, range.inicio, range.fin]
       );
       return rows;
     }
@@ -217,27 +221,27 @@ export async function GET(request: NextRequest) {
     /** Helper: arma una query con o sin filtro de fecha según `range`. */
     const buildFacturasQ = () => {
       const base = supabase.from("facturas").select("*").eq("empresa_id", empresaId);
-      return range ? base.gte("fecha", range.desde).lte("fecha", range.hasta) : base;
+      return range ? base.gte("fecha", range.inicio).lte("fecha", range.fin) : base;
     };
     const buildPagosQ = () => {
       const base = supabase.from("pagos").select("id, factura_id, monto, fecha_pago").eq("empresa_id", empresaId);
-      return range ? base.gte("fecha_pago", range.desde).lte("fecha_pago", range.hasta) : base;
+      return range ? base.gte("fecha_pago", range.inicio).lte("fecha_pago", range.fin) : base;
     };
     const buildTipificacionesQ = () => {
       const base = supabase.from("tipificaciones").select("*").eq("empresa_id", empresaId);
-      return range ? base.gte("fecha", range.desde).lte("fecha", range.hasta) : base;
+      return range ? base.gte("fecha", range.inicio).lte("fecha", range.fin) : base;
     };
     const buildVentasQ = () => {
       const base = supabase.from("ventas").select("*").eq("empresa_id", empresaId);
-      return range ? base.gte("fecha", range.desde).lte("fecha", range.hasta) : base;
+      return range ? base.gte("fecha", range.inicio).lte("fecha", range.fin) : base;
     };
     const buildComprasQ = () => {
       const base = supabase.from("compras").select("*").eq("empresa_id", empresaId);
-      return range ? base.gte("fecha", range.desde).lte("fecha", range.hasta) : base;
+      return range ? base.gte("fecha", range.inicio).lte("fecha", range.fin) : base;
     };
     const buildGastosQ = () => {
       const base = supabase.from("gastos").select("id, monto, fecha").eq("empresa_id", empresaId);
-      return range ? base.gte("fecha", range.desde).lte("fecha", range.hasta) : base;
+      return range ? base.gte("fecha", range.inicio).lte("fecha", range.fin) : base;
     };
 
     /**

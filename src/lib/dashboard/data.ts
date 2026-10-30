@@ -466,7 +466,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         tipo_venta: (r.tipo_venta as string) ?? "CONTADO",
         moneda: (r.moneda as string) ?? "GS",
         tipo_cambio: Number(r.tipo_cambio) ?? 1,
-        fecha: toCalendarDateStr(r.fecha as string) || toIsoTimestampStr(r.fecha as string),
+        fecha: toIsoTimestampStr(r.fecha as string),
       };
     });
 
