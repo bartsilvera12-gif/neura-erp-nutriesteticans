@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, ShoppingCart } from "lucide-react";
+import { Boxes, ShoppingCart } from "lucide-react";
 import { SettingsModuleCard } from "@/components/config/SettingsModuleCard";
 
 export default function ReportesPage() {
@@ -17,21 +17,21 @@ export default function ReportesPage() {
         <ul className="m-0 grid list-none gap-4 p-0 sm:grid-cols-2 xl:grid-cols-3">
           <li>
             <SettingsModuleCard
-              title="Facturas"
-              subtitle="COMERCIAL · DOCUMENTOS"
-              description="Todas las facturas de la empresa: cliente, monto, saldo, estado y estado SIFEN, con filtros y acceso al detalle."
-              icon={FileText}
-              href="/reportes/facturas"
+              title="Ventas"
+              subtitle="COMERCIAL · CAJA"
+              description="Cuánto se vendió en el período y por qué medio de pago, con detalle día por día y export a CSV."
+              icon={ShoppingCart}
+              href="/reportes/ventas"
               actionLabel="Ver reporte"
             />
           </li>
           <li>
             <SettingsModuleCard
-              title="Ventas por forma de pago"
-              subtitle="COMERCIAL · CAJA"
-              description="Cuánto entró por cada medio en el período, cruzando todas las cajas y turnos. Con detalle día por día y export a CSV."
-              icon={ShoppingCart}
-              href="/reportes/ventas"
+              title="Inventario"
+              subtitle="PRODUCTOS · STOCK"
+              description="Stock actual, productos sin stock o por reponer y valor de la mercadería, con export a Excel."
+              icon={Boxes}
+              href="/reportes/inventario"
               actionLabel="Ver reporte"
             />
           </li>
