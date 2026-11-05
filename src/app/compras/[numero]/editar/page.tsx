@@ -13,11 +13,12 @@
 import { useEffect, useMemo, useRef, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Loader2, Save, ArrowLeft, Trash2, Package as PackageIcon, FileText, Paperclip, Upload } from "lucide-react";
+import { Loader2, Save, ArrowLeft, Trash2, Package as PackageIcon, FileText, Paperclip, Upload, Ban } from "lucide-react";
 import MontoInput from "@/components/ui/MontoInput";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import ProductoBuscadorInline from "@/components/inventario/ProductoBuscadorInline";
-import { getCompras, editarCompra, uploadComprobante, type EditarCompraLineaPayload } from "@/lib/compras/storage";
+import CompraPagosPanel from "@/components/compras/CompraPagosPanel";
+import { getCompras, editarCompra, uploadComprobante, anularCompra, type EditarCompraLineaPayload } from "@/lib/compras/storage";
 import type { Compra, TipoIva } from "@/lib/compras/types";
 import { parseCantidad, pasoCantidad, permiteDecimales, formatCantidad } from "@/lib/productos/unidades";
 
@@ -64,6 +65,10 @@ export default function EditarCompraPage({ params }: { params: Promise<{ numero:
   const [eliminadas, setEliminadas] = useState<string[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [confirmar, setConfirmar] = useState(false);
+  const [estadoCompra, setEstadoCompra] = useState<string>("registrada");
+  const [anularOpen, setAnularOpen] = useState(false);
+  const [motivoAnular, setMotivoAnular] = useState("");
+  const [anulando, setAnulando] = useState(false);
   const keySeq = useRef(0);
   // Comprobante (imagen/PDF) de la compra: el actual + el nuevo si se sube.
   const [compActual, setCompActual] = useState<{ path: string | null; nombre: string | null }>({ path: null, nombre: null });
@@ -80,6 +85,7 @@ export default function EditarCompraPage({ params }: { params: Promise<{ numero:
         setBloqueada("Esta compra proviene de una orden de compra. Para corregirla, ajustá la orden de compra correspondiente.");
       }
       const cab = rows[0];
+      setEstadoCompra(cab.estado ?? "registrada");
       setProveedor(cab.proveedor_nombre);
       setNumeroFactura(cab.numero_factura ?? "");
       setNroTimbrado(cab.nro_timbrado ?? "");
@@ -373,19 +379,40 @@ export default function EditarCompraPage({ params }: { params: Promise<{ numero:
             </p>
           )}
 
-          <div className="flex justify-end gap-2">
-            <Link href="/compras" className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-              Cancelar
-            </Link>
-            <button
-              type="button"
-              onClick={() => setConfirmar(true)}
-              disabled={guardando}
-              className="inline-flex items-center gap-2 rounded-xl bg-[#4FAEB2] px-6 py-2.5 text-sm font-bold text-white shadow-md shadow-[#4FAEB2]/30 transition-colors hover:bg-[#3F8E91] disabled:opacity-50"
-            >
-              {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Guardar cambios
-            </button>
+          <CompraPagosPanel numeroControl={numeroControl} />
+
+          {estadoCompra === "anulada" && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              Esta compra está <strong>anulada</strong>. No se pueden editar sus líneas ni registrar nuevos pagos.
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {estadoCompra !== "anulada" ? (
+              <button
+                type="button"
+                onClick={() => { setMotivoAnular(""); setAnularOpen(true); }}
+                disabled={guardando || anulando}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-rose-300 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+              >
+                <Ban className="h-4 w-4" />
+                Anular compra
+              </button>
+            ) : <span />}
+            <div className="flex gap-2">
+              <Link href="/compras" className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                Cancelar
+              </Link>
+              <button
+                type="button"
+                onClick={() => setConfirmar(true)}
+                disabled={guardando || estadoCompra === "anulada"}
+                className="inline-flex items-center gap-2 rounded-xl bg-[#4FAEB2] px-6 py-2.5 text-sm font-bold text-white shadow-md shadow-[#4FAEB2]/30 transition-colors hover:bg-[#3F8E91] disabled:opacity-50"
+              >
+                {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Guardar cambios
+              </button>
+            </div>
           </div>
 
           <ConfirmModal
@@ -401,6 +428,56 @@ export default function EditarCompraPage({ params }: { params: Promise<{ numero:
             onCancel={() => setConfirmar(false)}
             onConfirm={() => { setConfirmar(false); guardar(); }}
           />
+
+          {/* Modal: Anular compra con motivo */}
+          {anularOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => !anulando && setAnularOpen(false)}>
+              <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-base font-bold text-slate-800">Anular compra {numeroControl}</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Se revertirá el stock de todos los productos de esta compra con un movimiento &quot;anulacion_compra&quot;.
+                  Si ya hay pagos, anulalos primero.
+                </p>
+                <label className="mt-4 block">
+                  <span className="text-xs font-semibold text-slate-700">Motivo *</span>
+                  <textarea
+                    value={motivoAnular}
+                    onChange={(e) => setMotivoAnular(e.target.value)}
+                    rows={3}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Mínimo 3 caracteres (ej: error de carga, factura duplicada)."
+                  />
+                </label>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAnularOpen(false)}
+                    disabled={anulando}
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={anulando || motivoAnular.trim().length < 3}
+                    onClick={async () => {
+                      setError(null);
+                      setAnulando(true);
+                      const r = await anularCompra(numeroControl, motivoAnular.trim());
+                      setAnulando(false);
+                      if (!r.ok) { setError(r.error); return; }
+                      setAnularOpen(false);
+                      router.push("/compras");
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-5 py-2 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-50"
+                  >
+                    {anulando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                    Confirmar anulación
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

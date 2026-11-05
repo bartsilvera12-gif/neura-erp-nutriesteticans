@@ -47,4 +47,7 @@ export interface Compra {
   orden_compra_item_id?: string | null;
 
   fecha: string;                 // ISO string, generado automáticamente
+
+  /** 'registrada' | 'anulada' */
+  estado?: string;
 }

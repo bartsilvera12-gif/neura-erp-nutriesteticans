@@ -702,3 +702,300 @@ export async function editarCompraConMovimiento(
     client.release();
   }
 }
+
+// ============================================================================
+// Anulación de compra (revertir stock) + pagos de compra
+// ============================================================================
+
+export interface AnularCompraResult {
+  numero_control: string;
+  lineas: number;
+  unidades_revertidas: number;
+}
+
+/**
+ * Anula una compra ya registrada. Marca cada fila con estado='anulada' y los
+ * tres campos de auditoría (anulada_at, anulada_por, anulada_motivo), y genera
+ * un movimiento SALIDA con origen='anulacion_compra' por cada línea para
+ * devolver el stock que la compra había sumado.
+ *
+ * Bloquea si:
+ *   - la compra ya está anulada,
+ *   - la compra proviene de una orden de compra (descuadra la OC),
+ *   - el stock actual de algún producto es menor que la cantidad comprada
+ *     (anular dejaría stock negativo — señal de que ya se vendió / consumió).
+ *   - existe algún pago no anulado asociado (hay que anular los pagos primero).
+ */
+export async function anularCompraConMovimiento(
+  schemaRaw: string,
+  empresaId: string,
+  numeroControl: string,
+  motivo: string,
+  usuario: { id: string | null; nombre: string | null }
+): Promise<AnularCompraResult> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tC = quoteSchemaTable(schema, "compras");
+  const tM = quoteSchemaTable(schema, "movimientos_inventario");
+  const tP = quoteSchemaTable(schema, "productos");
+  const tPg = quoteSchemaTable(schema, "compra_pagos");
+  const ref = `Anulación de compra ${numeroControl}`;
+
+  const client = await pool().connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: filas } = await client.query<CompraRow>(
+      `SELECT ${COLS} FROM ${tC}
+        WHERE empresa_id = $1::uuid AND numero_control = $2 FOR UPDATE`,
+      [empresaId, numeroControl]
+    );
+    if (filas.length === 0) throw new Error("Compra no encontrada.");
+    if (filas.some((r) => r.estado === "anulada")) throw new Error("La compra ya está anulada.");
+    if (filas.some((r) => r.orden_compra_numero)) {
+      throw new Error("Esta compra proviene de una orden de compra y no se puede anular acá.");
+    }
+
+    // Bloqueo por pagos existentes no anulados.
+    const { rows: pagos } = await client.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM ${tPg}
+        WHERE empresa_id = $1::uuid AND compra_numero_control = $2 AND anulado_at IS NULL`,
+      [empresaId, numeroControl]
+    );
+    if (Number(pagos[0]?.n ?? 0) > 0) {
+      throw new Error("Esta compra tiene pagos registrados. Anulá primero los pagos.");
+    }
+
+    // Validación de stock disponible para cada línea.
+    for (const f of filas) {
+      const { rows: p } = await client.query<{ stock_actual: string }>(
+        `SELECT stock_actual FROM ${tP} WHERE id = $1::uuid AND empresa_id = $2::uuid`,
+        [f.producto_id, empresaId]
+      );
+      const stock = Number(p[0]?.stock_actual ?? 0);
+      const cant = Number(f.cantidad) || 0;
+      if (stock < cant) {
+        throw new Error(
+          `No se puede anular: el stock actual de ${f.producto_nombre} (${stock}) es menor que la cantidad comprada (${cant}).`
+        );
+      }
+    }
+
+    let unidades = 0;
+    for (const f of filas) {
+      const cant = Number(f.cantidad) || 0;
+      if (cant > 0) {
+        await client.query(
+          `UPDATE ${tP} SET stock_actual = stock_actual - $1::numeric, updated_at = now()
+            WHERE id = $2::uuid AND empresa_id = $3::uuid`,
+          [cant, f.producto_id, empresaId]
+        );
+        await client.query(
+          `INSERT INTO ${tM} (
+             empresa_id, producto_id, producto_nombre, producto_sku,
+             tipo, cantidad, costo_unitario, origen, referencia, fecha, created_by, usuario_nombre
+           )
+           SELECT $1::uuid, $2::uuid, $3, COALESCE(p.sku, ''),
+                  'SALIDA', $4::numeric, $5::numeric, 'anulacion_compra', $6, now(), $7::uuid, $8
+             FROM ${tP} p WHERE p.id = $2::uuid`,
+          [empresaId, f.producto_id, f.producto_nombre, cant,
+           Number(f.costo_unitario) || 0, ref, usuario.id, usuario.nombre]
+        );
+        unidades += cant;
+      }
+    }
+
+    await client.query(
+      `UPDATE ${tC}
+          SET estado = 'anulada',
+              anulada_at = now(),
+              anulada_por = $1::uuid,
+              anulada_motivo = $2,
+              updated_at = now()
+        WHERE empresa_id = $3::uuid AND numero_control = $4`,
+      [usuario.id, motivo.slice(0, 500), empresaId, numeroControl]
+    );
+
+    await client.query("COMMIT");
+    return { numero_control: numeroControl, lineas: filas.length, unidades_revertidas: unidades };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => null);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export interface CompraPagoRow {
+  id: string;
+  empresa_id: string;
+  compra_numero_control: string;
+  fecha: string;
+  monto: string | number;
+  medio_pago: string;
+  moneda: string;
+  observacion: string | null;
+  created_by: string | null;
+  usuario_nombre: string | null;
+  created_at: string;
+  anulado_at: string | null;
+  anulado_por: string | null;
+  anulado_motivo: string | null;
+}
+
+/** Suma de pagos NO anulados de una compra. */
+async function sumPagos(
+  client: import("pg").PoolClient,
+  tPg: string,
+  empresaId: string,
+  numeroControl: string
+): Promise<number> {
+  const { rows } = await client.query<{ s: string | null }>(
+    `SELECT COALESCE(SUM(monto), 0)::text AS s FROM ${tPg}
+      WHERE empresa_id = $1::uuid AND compra_numero_control = $2 AND anulado_at IS NULL`,
+    [empresaId, numeroControl]
+  );
+  return Number(rows[0]?.s ?? 0);
+}
+
+export interface CompraResumen {
+  numero_control: string;
+  total: number;
+  pagado: number;
+  saldo: number;
+  tipo_pago: string;
+  estado: string;
+}
+
+/** Total de la compra (suma filas) + pagado + saldo. */
+export async function getCompraResumen(
+  schemaRaw: string,
+  empresaId: string,
+  numeroControl: string
+): Promise<CompraResumen | null> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tC = quoteSchemaTable(schema, "compras");
+  const tPg = quoteSchemaTable(schema, "compra_pagos");
+  const client = await pool().connect();
+  try {
+    const { rows } = await client.query<{ total: string; tipo_pago: string; estado: string }>(
+      `SELECT COALESCE(SUM(total), 0)::text AS total,
+              MIN(tipo_pago) AS tipo_pago, MIN(estado) AS estado
+         FROM ${tC} WHERE empresa_id = $1::uuid AND numero_control = $2`,
+      [empresaId, numeroControl]
+    );
+    if (!rows[0] || rows[0].tipo_pago == null) return null;
+    const total = Number(rows[0].total ?? 0);
+    const pagado = await sumPagos(client, tPg, empresaId, numeroControl);
+    return {
+      numero_control: numeroControl,
+      total,
+      pagado,
+      saldo: Math.max(0, total - pagado),
+      tipo_pago: rows[0].tipo_pago,
+      estado: rows[0].estado,
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function listCompraPagos(
+  schemaRaw: string,
+  empresaId: string,
+  numeroControl: string
+): Promise<CompraPagoRow[]> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tPg = quoteSchemaTable(schema, "compra_pagos");
+  const { rows } = await pool().query<CompraPagoRow>(
+    `SELECT id, empresa_id, compra_numero_control, fecha, monto, medio_pago, moneda,
+            observacion, created_by, usuario_nombre, created_at,
+            anulado_at, anulado_por, anulado_motivo
+       FROM ${tPg}
+      WHERE empresa_id = $1::uuid AND compra_numero_control = $2
+      ORDER BY fecha DESC, created_at DESC`,
+    [empresaId, numeroControl]
+  );
+  return rows;
+}
+
+export interface InsertCompraPagoInput {
+  fecha: string; // YYYY-MM-DD
+  monto: number;
+  medio_pago: string;
+  observacion: string | null;
+}
+
+/** Registra un pago aplicado a una compra. Valida que no supere el saldo. */
+export async function insertCompraPago(
+  schemaRaw: string,
+  empresaId: string,
+  numeroControl: string,
+  input: InsertCompraPagoInput,
+  usuario: { id: string | null; nombre: string | null }
+): Promise<CompraPagoRow> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tC = quoteSchemaTable(schema, "compras");
+  const tPg = quoteSchemaTable(schema, "compra_pagos");
+  const client = await pool().connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: cab } = await client.query<{ total: string; tipo_pago: string; estado: string; moneda: string }>(
+      `SELECT COALESCE(SUM(total),0)::text AS total, MIN(tipo_pago) AS tipo_pago,
+              MIN(estado) AS estado, MIN(moneda) AS moneda
+         FROM ${tC} WHERE empresa_id = $1::uuid AND numero_control = $2`,
+      [empresaId, numeroControl]
+    );
+    if (!cab[0] || cab[0].tipo_pago == null) throw new Error("Compra no encontrada.");
+    if (cab[0].estado === "anulada") throw new Error("La compra está anulada; no acepta pagos.");
+    const total = Number(cab[0].total);
+    const pagado = await sumPagos(client, tPg, empresaId, numeroControl);
+    const saldo = Math.max(0, total - pagado);
+    if (!(input.monto > 0)) throw new Error("El monto debe ser mayor a 0.");
+    if (input.monto > saldo + 0.009) {
+      throw new Error(`El monto supera el saldo pendiente (${saldo.toLocaleString("es-PY")}).`);
+    }
+
+    const { rows: nueva } = await client.query<CompraPagoRow>(
+      `INSERT INTO ${tPg} (
+         empresa_id, compra_numero_control, fecha, monto, medio_pago, moneda,
+         observacion, created_by, usuario_nombre
+       ) VALUES (
+         $1::uuid, $2, $3::date, $4::numeric, $5, $6, $7, $8::uuid, $9
+       )
+       RETURNING id, empresa_id, compra_numero_control, fecha, monto, medio_pago, moneda,
+                 observacion, created_by, usuario_nombre, created_at,
+                 anulado_at, anulado_por, anulado_motivo`,
+      [empresaId, numeroControl, input.fecha, input.monto, input.medio_pago,
+       cab[0].moneda || "GS", input.observacion, usuario.id, usuario.nombre]
+    );
+
+    await client.query("COMMIT");
+    return nueva[0];
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => null);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function anularCompraPago(
+  schemaRaw: string,
+  empresaId: string,
+  pagoId: string,
+  motivo: string,
+  usuario: { id: string | null; nombre: string | null }
+): Promise<{ id: string }> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tPg = quoteSchemaTable(schema, "compra_pagos");
+  const { rows } = await pool().query<{ id: string }>(
+    `UPDATE ${tPg}
+        SET anulado_at = now(), anulado_por = $1::uuid, anulado_motivo = $2
+      WHERE id = $3::uuid AND empresa_id = $4::uuid AND anulado_at IS NULL
+      RETURNING id`,
+    [usuario.id, motivo.slice(0, 500), pagoId, empresaId]
+  );
+  if (rows.length === 0) throw new Error("Pago no encontrado o ya anulado.");
+  return rows[0];
+}

@@ -52,6 +52,7 @@ function mapRow(r: CompraApiRow): Compra {
     comprobante_nombre: r.comprobante_nombre ?? null,
     comprobante_mime_type: r.comprobante_mime_type ?? null,
     fecha: r.fecha,
+    estado: r.estado ?? "registrada",
   };
 }
 
@@ -250,6 +251,118 @@ export async function editarCompra(
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j?.success) return { ok: false, error: (j as { error?: string })?.error ?? "No se pudo editar la compra." };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Error de conexión." };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Anulación y pagos
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface CompraResumen {
+  numero_control: string;
+  total: number;
+  pagado: number;
+  saldo: number;
+  tipo_pago: string;
+  estado: string;
+}
+
+export interface CompraPago {
+  id: string;
+  compra_numero_control: string;
+  fecha: string;
+  monto: number;
+  medio_pago: string;
+  moneda: string;
+  observacion: string | null;
+  usuario_nombre: string | null;
+  created_at: string;
+  anulado_at: string | null;
+  anulado_motivo: string | null;
+}
+
+export async function anularCompra(
+  numeroControl: string, motivo: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const r = await fetch(`/api/compras/${encodeURIComponent(numeroControl)}/anular`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ motivo }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j?.success) return { ok: false, error: (j as { error?: string })?.error ?? "No se pudo anular la compra." };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Error de conexión." };
+  }
+}
+
+interface PagoApiRow {
+  id: string; compra_numero_control: string; fecha: string;
+  monto: string | number; medio_pago: string; moneda: string;
+  observacion: string | null; usuario_nombre: string | null; created_at: string;
+  anulado_at: string | null; anulado_motivo: string | null;
+}
+
+export async function getCompraPagos(
+  numeroControl: string
+): Promise<{ ok: true; resumen: CompraResumen; pagos: CompraPago[] } | { ok: false; error: string }> {
+  try {
+    const r = await fetch(`/api/compras/${encodeURIComponent(numeroControl)}/pagos`, {
+      credentials: "include",
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j?.success) return { ok: false, error: (j as { error?: string })?.error ?? "No se pudieron obtener los pagos." };
+    const d = j.data as { resumen: CompraResumen; pagos: PagoApiRow[] };
+    return {
+      ok: true,
+      resumen: d.resumen,
+      pagos: d.pagos.map((p) => ({ ...p, monto: Number(p.monto) })),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Error de conexión." };
+  }
+}
+
+export async function registrarCompraPago(
+  numeroControl: string,
+  input: { fecha: string; monto: number; medio_pago: string; observacion?: string | null }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const r = await fetch(`/api/compras/${encodeURIComponent(numeroControl)}/pagos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(input),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j?.success) return { ok: false, error: (j as { error?: string })?.error ?? "No se pudo registrar el pago." };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Error de conexión." };
+  }
+}
+
+export async function anularCompraPago(
+  numeroControl: string, pagoId: string, motivo: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const r = await fetch(
+      `/api/compras/${encodeURIComponent(numeroControl)}/pagos/${encodeURIComponent(pagoId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ motivo }),
+      }
+    );
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j?.success) return { ok: false, error: (j as { error?: string })?.error ?? "No se pudo anular el pago." };
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Error de conexión." };

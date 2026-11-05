@@ -50,6 +50,7 @@ type GrupoCompra = {
   total: number;
   comprobante: boolean;
   orden_compra_numero: string | null;
+  anulada: boolean;
 };
 
 function agrupar(rows: Compra[]): GrupoCompra[] {
@@ -68,12 +69,14 @@ function agrupar(rows: Compra[]): GrupoCompra[] {
         total: 0,
         comprobante: false,
         orden_compra_numero: c.orden_compra_numero ?? null,
+        anulada: c.estado === "anulada",
       };
       map.set(key, g);
     }
     g.items.push(c);
     g.total += Number(c.total) || 0;
     if (c.comprobante_storage_path) g.comprobante = true;
+    if (c.estado === "anulada") g.anulada = true;
   }
   return [...map.values()].sort(
     (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
@@ -325,14 +328,27 @@ export default function ComprasPage() {
                         <td className="py-4 pr-4 text-right tabular-nums text-gray-700">{g.items.length}</td>
                         <td className="py-4 pr-4 text-right tabular-nums font-semibold text-gray-800">{formatGs(g.total)}</td>
                         <td className="hidden py-4 pr-4 lg:table-cell">
-                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${g.tipo_pago ? tipoPagoBadge[g.tipo_pago] : "bg-gray-100 text-gray-500"}`}>
-                            {g.tipo_pago === "contado" ? "Contado" : g.tipo_pago === "credito" ? `Crédito ${g.plazo_dias ?? ""}d` : "—"}
-                          </span>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${g.tipo_pago ? tipoPagoBadge[g.tipo_pago] : "bg-gray-100 text-gray-500"}`}>
+                              {g.tipo_pago === "contado" ? "Contado" : g.tipo_pago === "credito" ? `Crédito ${g.plazo_dias ?? ""}d` : "—"}
+                            </span>
+                            {g.anulada && (
+                              <span className="px-2 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-700">Anulada</span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-4 pr-4 text-gray-500 text-xs tabular-nums">{formatFecha(g.fecha)}</td>
                         <td className="py-4 text-right">
-                          {/* Editar: solo compras manuales (las de OC se ajustan desde la orden). */}
-                          {!g.orden_compra_numero ? (
+                          {g.anulada ? (
+                            <Link
+                              href={`/compras/${encodeURIComponent(g.numero_control)}/editar`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+                              title="Ver compra anulada"
+                            >
+                              Ver
+                            </Link>
+                          ) : !g.orden_compra_numero ? (
                             <Link
                               href={`/compras/${encodeURIComponent(g.numero_control)}/editar`}
                               onClick={(e) => e.stopPropagation()}
