@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import Sidebar from "./layout/Sidebar";
 import Header from "./layout/Header";
 
-const STANDALONE_ROUTES = ["/login"];
+const STANDALONE_ROUTES = ["/login", "/bloqueado"];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
